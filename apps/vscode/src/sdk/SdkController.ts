@@ -53,7 +53,7 @@ import { arePathsEqual, getDesktopDir } from "@/utils/path"
 import { ClineAccountService } from "./account-service"
 import { AuthService, LogoutReason } from "./auth-service"
 import { BUILTIN_SLASH_COMMANDS } from "./builtin-slash-commands"
-import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-session-factory"
+import { buildStartSessionInput, createHistoryItemFromSession, resolveSessionReasoningConfig } from "./cline-session-factory"
 import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
 import { createProviderCatalog } from "./model-catalog/catalog"
 import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
@@ -713,6 +713,36 @@ export class Controller {
 				?.updateActiveSessionModel(event.selection.modelId)
 				.catch((error) => Logger.error("[SdkController] Failed to update active session model:", error))
 		}
+
+		if (event.kind === "fields" && this.isFieldsChangeForActiveModeProvider(event)) {
+			// Provider settings changed for the provider backing the active
+			// session. Re-resolve the reasoning fields the session factory
+			// would use and push them to the live session, so a Reasoning
+			// Effort change made mid-task applies to the next turn instead of
+			// only to the next task.
+			this.pushReasoningConfigToActiveSession()
+		}
+	}
+
+	private pushReasoningConfigToActiveSession(): void {
+		if (!this.sessions?.getActiveSession()) {
+			return
+		}
+		try {
+			const modeValue = this.stateManager.getGlobalSettingsKey("mode")
+			const mode = modeValue === "plan" ? "plan" : "act"
+			const apiConfig = this.stateManager.getApiConfiguration()
+			const modeProvider = mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
+			if (modeProvider === undefined) {
+				return
+			}
+			const reasoning = resolveSessionReasoningConfig(toLegacyApiProvider(modeProvider), mode, apiConfig)
+			this.sessions
+				.updateActiveSessionReasoning(reasoning)
+				.catch((error) => Logger.error("[SdkController] Failed to update active session reasoning:", error))
+		} catch (error) {
+			Logger.error("[SdkController] Failed to resolve reasoning config for active session:", error)
+		}
 	}
 
 	handleApiConfigurationChanged(previous: ApiConfiguration, next: ApiConfiguration): void {
@@ -744,6 +774,22 @@ export class Controller {
 			// (e.g. `openai-compatible`) still match the parse-normalized
 			// event id and model-only commits keep the lightweight
 			// in-session update path.
+			return toLegacyApiProvider(activeProvider) === toLegacyApiProvider(event.providerId.toString())
+		} catch {
+			return false
+		}
+	}
+
+	private isFieldsChangeForActiveModeProvider(event: Extract<ProviderConfigChange, { kind: "fields" }>): boolean {
+		try {
+			const modeValue = this.stateManager.getGlobalSettingsKey("mode")
+			const mode = modeValue === "plan" ? "plan" : "act"
+			const apiConfig = this.stateManager.getApiConfiguration()
+			const activeProvider = mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
+			if (activeProvider === undefined) {
+				return false
+			}
+			// Normalize both sides (see isSelectionForActiveModeProvider).
 			return toLegacyApiProvider(activeProvider) === toLegacyApiProvider(event.providerId.toString())
 		} catch {
 			return false

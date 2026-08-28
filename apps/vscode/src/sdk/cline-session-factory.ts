@@ -142,7 +142,7 @@ function resolveWorkspaceName(workspacePath: string): string {
 
 type ReasoningEffort = NonNullable<CoreSessionConfig["reasoningEffort"]>
 type ProviderReasoningSettings = NonNullable<ProviderSettings["reasoning"]>
-type SessionReasoningConfig = Pick<CoreSessionConfig, "thinking" | "reasoningEffort">
+export type SessionReasoningConfig = Pick<CoreSessionConfig, "thinking" | "reasoningEffort">
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
 	return value === "low" || value === "medium" || value === "high" || value === "xhigh"
@@ -217,6 +217,23 @@ function resolveProviderReasoningConfig(providerId: string): SessionReasoningCon
 		Logger.warn("[SessionFactory] Provider reasoning resolution failed:", error)
 		return {}
 	}
+}
+
+/**
+ * Resolve the session reasoning fields (thinking/reasoningEffort) a provider's
+ * persisted settings imply. This is the single derivation used both when a
+ * session is built and when reasoning settings change while a session is
+ * active (SdkController pushes the result to the live session). OCA prefers
+ * its legacy mode-specific effort fields, falling back to providers.json.
+ */
+export function resolveSessionReasoningConfig(
+	providerId: string,
+	mode: Mode,
+	apiConfig: ApiConfiguration | undefined,
+): SessionReasoningConfig {
+	return providerId === "oca"
+		? (resolveOcaReasoningConfig(mode, apiConfig) ?? resolveProviderReasoningConfig(providerId))
+		: resolveProviderReasoningConfig(providerId)
 }
 
 function resolveOcaReasoningConfig(mode: Mode, apiConfig: ApiConfiguration | undefined): SessionReasoningConfig | undefined {
@@ -897,10 +914,7 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		positiveFiniteNumber(overriddenMaxTokens) ??
 		(providerId === "openai" ? resolveOpenAiCompatibleMaxTokens(apiConfig, mode) : undefined)
 	const temperature = nonNegativeFiniteNumber(committedRuntimeModel?.overrides?.temperature)
-	const reasoningConfig =
-		providerId === "oca"
-			? (resolveOcaReasoningConfig(mode, apiConfig) ?? resolveProviderReasoningConfig(providerId))
-			: resolveProviderReasoningConfig(providerId)
+	const reasoningConfig = resolveSessionReasoningConfig(providerId, mode, apiConfig)
 
 	// Include rich workspace metadata so Cline API observability can extract
 	// git remotes and the latest commit hash from the system message.

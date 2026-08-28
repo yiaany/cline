@@ -1,17 +1,18 @@
-import type {
-	CoreSessionEvent,
-	ITelemetryService,
-	PreparedRemoteConfigCoreIntegration,
-	RestoreInput,
-	RestoreResult,
-	StartSessionResult,
+import {
+	buildConnectionUpdate,
+	type CoreSessionEvent,
+	type ITelemetryService,
+	type PreparedRemoteConfigCoreIntegration,
+	type RestoreInput,
+	type RestoreResult,
+	type StartSessionResult,
 } from "@cline/core"
 import { formatModeSwitchNotice, type ModeSwitchNotice } from "@cline/shared"
 import { StateManager } from "@/core/storage/StateManager"
 import type { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
 import { McpHub } from "@/services/mcp/McpHub"
 import { Logger } from "@/shared/services/Logger"
-import type { ActiveSession } from "./cline-session-factory"
+import type { ActiveSession, SessionReasoningConfig } from "./cline-session-factory"
 import type { SdkForegroundCommandCoordinator } from "./sdk-foreground-command-coordinator"
 import { buildToolPolicies } from "./sdk-tool-policies"
 import type { SdkSessionHost } from "./session-host"
@@ -138,6 +139,32 @@ export class SdkSessionLifecycle {
 		}
 
 		await activeSession.sdkHost.updateSessionModel(activeSession.sessionId, modelId)
+		return true
+	}
+
+	/**
+	 * Applies a reasoning-settings change to the active session so subsequent
+	 * turns of the current task honor it, matching what a freshly built
+	 * session would resolve. Without this push, an effort change made mid-task
+	 * only takes effect on the next task (the session keeps the reasoning
+	 * fields captured when it was built).
+	 */
+	async updateActiveSessionReasoning(reasoning: SessionReasoningConfig): Promise<boolean> {
+		const activeSession = this.activeSession
+		if (!activeSession?.sdkHost.updateSessionConnection) {
+			return false
+		}
+		if (reasoning.thinking === undefined && reasoning.reasoningEffort === undefined) {
+			// The provider settings carry no reasoning signal; leave the
+			// session's reasoning state untouched.
+			return false
+		}
+
+		const update = buildConnectionUpdate({
+			thinking: reasoning.thinking,
+			reasoningEffort: reasoning.reasoningEffort,
+		})
+		await activeSession.sdkHost.updateSessionConnection(activeSession.sessionId, update)
 		return true
 	}
 

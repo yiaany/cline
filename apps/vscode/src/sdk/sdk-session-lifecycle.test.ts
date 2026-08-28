@@ -566,6 +566,68 @@ describe("SdkSessionLifecycle", () => {
 		expect(didUpdate).toBe(false)
 	})
 
+	it("pushes a reasoning-effort change to the active session for subsequent turns", async () => {
+		const updateSessionConnection = vi.fn().mockResolvedValue(undefined)
+		const sdkHost = makeSdkHost({ startResult: { sessionId: "session-123" }, updateSessionConnection })
+		mockCreateSessionHost.mockResolvedValueOnce(sdkHost)
+		const lifecycle = makeLifecycle()
+		// biome-ignore lint/suspicious/noExplicitAny: focused fake for lifecycle unit test
+		await lifecycle.startNewSession({} as any)
+
+		const didUpdate = await lifecycle.updateActiveSessionReasoning({ thinking: true, reasoningEffort: "low" })
+
+		expect(didUpdate).toBe(true)
+		expect(updateSessionConnection).toHaveBeenCalledWith("session-123", {
+			thinking: true,
+			reasoningEffort: "low",
+			thinkingBudgetTokens: null,
+		})
+	})
+
+	it("disables reasoning on the active session when effort is set to none", async () => {
+		const updateSessionConnection = vi.fn().mockResolvedValue(undefined)
+		const sdkHost = makeSdkHost({ startResult: { sessionId: "session-123" }, updateSessionConnection })
+		mockCreateSessionHost.mockResolvedValueOnce(sdkHost)
+		const lifecycle = makeLifecycle()
+		// biome-ignore lint/suspicious/noExplicitAny: focused fake for lifecycle unit test
+		await lifecycle.startNewSession({} as any)
+
+		const didUpdate = await lifecycle.updateActiveSessionReasoning({ thinking: false })
+
+		expect(didUpdate).toBe(true)
+		expect(updateSessionConnection).toHaveBeenCalledWith("session-123", {
+			thinking: false,
+			reasoningEffort: null,
+			thinkingBudgetTokens: null,
+		})
+	})
+
+	it("leaves session reasoning untouched when settings carry no reasoning signal", async () => {
+		const updateSessionConnection = vi.fn().mockResolvedValue(undefined)
+		const sdkHost = makeSdkHost({ startResult: { sessionId: "session-123" }, updateSessionConnection })
+		mockCreateSessionHost.mockResolvedValueOnce(sdkHost)
+		const lifecycle = makeLifecycle()
+		// biome-ignore lint/suspicious/noExplicitAny: focused fake for lifecycle unit test
+		await lifecycle.startNewSession({} as any)
+
+		const didUpdate = await lifecycle.updateActiveSessionReasoning({})
+
+		expect(didUpdate).toBe(false)
+		expect(updateSessionConnection).not.toHaveBeenCalled()
+	})
+
+	it("does not push reasoning when the host lacks updateSessionConnection", async () => {
+		const sdkHost = makeSdkHost({ startResult: { sessionId: "session-123" } })
+		mockCreateSessionHost.mockResolvedValueOnce(sdkHost)
+		const lifecycle = makeLifecycle()
+		// biome-ignore lint/suspicious/noExplicitAny: focused fake for lifecycle unit test
+		await lifecycle.startNewSession({} as any)
+
+		const didUpdate = await lifecycle.updateActiveSessionReasoning({ thinking: true, reasoningEffort: "high" })
+
+		expect(didUpdate).toBe(false)
+	})
+
 	it("detects abort errors", () => {
 		const error = new Error("aborted by user")
 		expect(isAbortError(error)).toBe(true)
