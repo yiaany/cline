@@ -290,8 +290,12 @@ export const OpenAICompatibleProvider = ({
 			// edit like it did when the legacy extension kept it in a single
 			// id-independent blob. Recommit the displayed overrides under the
 			// new id; otherwise an unknown id resolves to safe defaults whose
-			// zero prices misbill paid requests as $0.
-			const overrides = selectedModelOverridesRef.current[currentMode].overrides
+			// zero prices misbill paid requests as $0. Reasoning effort is the
+			// exception: it is strictly per-model, so it must never follow a
+			// model switch (the host preserves the target model's own stored
+			// value when the carried set omits it).
+			const { reasoningEffort: _carriedReasoningEffort, ...overrides } =
+				selectedModelOverridesRef.current[currentMode].overrides
 			const hasOverrides = Object.keys(overrides).length > 0
 			selectedModelOverridesRef.current[currentMode] = { modelId, overrides }
 			commitOpenAiSelection(modelId, hasOverrides ? overrides : undefined)

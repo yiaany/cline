@@ -681,6 +681,21 @@ describe("OpenAICompatibleProvider", () => {
 		expect(screen.getByRole("checkbox", { name: "Use Azure Identity Authentication" })).toBeChecked()
 	})
 
+	it("does not carry the reasoning effort override when only the model id changes", async () => {
+		mocks.refreshOpenAiModels.mockResolvedValue({ values: ["custom-model", "listed-model"] })
+		setCommittedSelection({ inputPrice: 3, reasoningEffort: "high" })
+		renderProvider()
+		await act(async () => {})
+
+		fireEvent.change(screen.getByLabelText("Model ID"), { target: { value: "listed-model" } })
+
+		expect(mocks.commitSelection).toHaveBeenCalledWith("act", {
+			providerId: "custom-openai",
+			modelId: "listed-model",
+			overrides: { inputPrice: 3 },
+		})
+	})
+
 	it("commits reasoning effort as a per-model override and keeps the provider-level fallback", async () => {
 		setCommittedSelection({ inputPrice: 3 })
 		render(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={true} />)

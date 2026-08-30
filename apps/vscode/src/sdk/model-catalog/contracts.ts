@@ -411,7 +411,10 @@ export interface ProviderConfigStore extends ProviderConfigReader {
 	/**
 	 * Commit a model ID atomically with optional user-authored overrides.
 	 * Supplying overrides replaces that model's stored override entry; omitting
-	 * them leaves the existing entry unchanged.
+	 * them leaves the existing entry unchanged. Exception: a non-empty
+	 * replacement that omits `reasoningEffort` preserves the model's stored
+	 * reasoning effort (reasoning is strictly per-model, while the settings UI
+	 * carries the other user-authored overrides across model-id switches).
 	 *
 	 * `baseModelInfoHint` is the exact host-resolved catalog metadata selected
 	 * by the user. It is authoritative for that commit, including when a

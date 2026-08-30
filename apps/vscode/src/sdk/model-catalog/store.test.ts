@@ -746,6 +746,38 @@ describe("createProviderConfigStore", () => {
 		expect(store.readSelection(providerId, "act")?.overrides).toEqual({ reasoningEffort: "none" })
 	})
 
+	it("preserves a model's stored reasoning effort when a replacement set omits it", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "custom-model",
+			overrides: { reasoningEffort: "low", inputPrice: 3 },
+		})
+		// The settings UI strips reasoningEffort from overrides carried across
+		// a model-id switch; the omission must not delete the stored value.
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "custom-model",
+			overrides: { inputPrice: 4 },
+		})
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["custom-model"]).toEqual({
+			inputPrice: 4,
+			reasoningEffort: "low",
+		})
+
+		// An explicitly empty replacement still clears the whole entry.
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "custom-model",
+			overrides: {},
+		})
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["custom-model"]).toBeUndefined()
+	})
+
 	it("drops an unknown reasoning effort value at the storage boundary", async () => {
 		const { createProviderConfigStore } = await import("./store")
 		const store = createProviderConfigStore()

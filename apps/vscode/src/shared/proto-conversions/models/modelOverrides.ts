@@ -16,6 +16,10 @@ import { ModelOverrides } from "@shared/proto/cline/models"
  * When committing a selection, the overrides value is tri-state: `undefined`
  * preserves the model's stored overrides, an explicitly empty object clears
  * them, and a non-empty object replaces them wholesale (no per-field merge).
+ * Exception: a non-empty replacement that omits `reasoningEffort` preserves
+ * the model's stored reasoning effort — the settings UI carries the other
+ * user-authored overrides across model-id switches, and reasoning effort is
+ * strictly per-model.
  */
 export interface ProviderModelOverrides {
 	name?: string

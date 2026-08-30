@@ -329,6 +329,15 @@ function writeModelOverrides(providerId: ProviderId, modelId: string, overrides:
 	const normalizedOverrides = normalizeModelSelectionOverrides(overrides)
 	const storedEntry = normalizedOverrides ? toStoredModelEntry(normalizedOverrides) : undefined
 	if (storedEntry && Object.keys(storedEntry).length > 0) {
+		// Reasoning effort is strictly per-model and the settings UI carries
+		// the other user-authored overrides across model-id switches (legacy
+		// single-blob semantics). A replacement set that omits reasoningEffort
+		// must therefore keep the model's own stored value instead of
+		// wholesale-deleting it with the rest of the entry.
+		const existingReasoningEffort = nextModels[modelId]?.reasoningEffort
+		if (existingReasoningEffort !== undefined && storedEntry.reasoningEffort === undefined) {
+			storedEntry.reasoningEffort = existingReasoningEffort
+		}
 		nextModels[modelId] = storedEntry
 	} else {
 		delete nextModels[modelId]
