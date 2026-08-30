@@ -12,6 +12,7 @@ import { type ApiConfiguration, type ApiProvider, type ModelInfo, openAiModelInf
 import { Logger } from "@shared/services/Logger"
 import { getProviderModelIdKey } from "@shared/storage/provider-keys"
 import { isSecretKey, isSettingsKey, type SecretKey, type SettingsKey } from "@shared/storage/state-keys"
+import { isOpenaiReasoningEffort } from "@shared/storage/types"
 import { StateManager } from "@/core/storage/StateManager"
 import { getProviderSettingsManager } from "../provider-migration"
 import type {
@@ -240,6 +241,7 @@ function normalizeModelSelectionOverrides(overrides: ModelSelectionOverrides | u
 	const cacheWritesPrice = nonNegativeFiniteNumber(overrides.cacheWritesPrice)
 	const temperature = nonNegativeFiniteNumber(overrides.temperature)
 	const apiFormat = toStoredApiFormat(overrides.apiFormat) !== undefined ? overrides.apiFormat : undefined
+	const reasoningEffort = isOpenaiReasoningEffort(overrides.reasoningEffort) ? overrides.reasoningEffort : undefined
 	const next: ModelSelectionOverrides = {
 		...(overrides.name !== undefined ? { name: overrides.name } : {}),
 		...(maxTokens !== undefined ? { maxTokens } : {}),
@@ -255,6 +257,7 @@ function normalizeModelSelectionOverrides(overrides: ModelSelectionOverrides | u
 		...(cacheWritesPrice !== undefined ? { cacheWritesPrice } : {}),
 		...(temperature !== undefined ? { temperature } : {}),
 		...(apiFormat !== undefined ? { apiFormat } : {}),
+		...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
 	}
 	return Object.keys(next).length > 0 ? next : undefined
 }
@@ -277,6 +280,7 @@ function toStoredModelEntry(overrides: ModelSelectionOverrides): StoredModelEntr
 		...(overrides.cacheWritesPrice !== undefined ? { cacheWritesPrice: overrides.cacheWritesPrice } : {}),
 		...(overrides.temperature !== undefined ? { temperature: overrides.temperature } : {}),
 		...(apiFormat !== undefined ? { apiFormat } : {}),
+		...(isOpenaiReasoningEffort(overrides.reasoningEffort) ? { reasoningEffort: overrides.reasoningEffort } : {}),
 	}
 }
 
@@ -300,6 +304,7 @@ function toSelectionOverrides(entry: StoredModelEntry | undefined): ModelSelecti
 		...(entry.cacheWritesPrice !== undefined ? { cacheWritesPrice: entry.cacheWritesPrice } : {}),
 		...(entry.temperature !== undefined ? { temperature: entry.temperature } : {}),
 		...(apiFormat !== undefined ? { apiFormat } : {}),
+		...(entry.reasoningEffort !== undefined ? { reasoningEffort: entry.reasoningEffort } : {}),
 	})
 }
 

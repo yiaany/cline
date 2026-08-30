@@ -151,6 +151,10 @@ message ModelOverrides {
   optional double cache_writes_price = 12;
   optional double temperature = 13;
   optional ApiFormat api_format = 14;
+  // Per-model reasoning effort: "none" | "low" | "medium" | "high" | "xhigh".
+  // "none" pins the model to thinking-off; absent inherits the provider-level
+  // reasoning setting.
+  optional string reasoning_effort = 16;
 }
 
 // Shared response message for model information

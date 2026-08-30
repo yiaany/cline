@@ -2,7 +2,7 @@ import { TooltipContent, TooltipTrigger } from "@radix-ui/react-tooltip"
 import { azureOpenAiDefaultApiVersion, type OpenAiCompatibleModelInfo, openAiModelInfoSafeDefaults } from "@shared/api"
 import { OpenAiModelsRequest } from "@shared/proto/cline/models"
 import { fromProtobufModelInfo } from "@shared/proto-conversions/models/typeConversion"
-import type { Mode } from "@shared/storage/types"
+import { isOpenaiReasoningEffort, type Mode } from "@shared/storage/types"
 import { VSCodeButton, VSCodeCheckbox, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Tooltip } from "@/components/ui/tooltip"
@@ -116,6 +116,16 @@ export const OpenAICompatibleProvider = ({
 		}
 		selectedModelOverridesRef.current[currentMode] = { modelId: selectedModelId, overrides: selectedModelOverrides }
 	}, [committedSelection?.overrides, selectedModelId, currentMode])
+
+	// Reasoning effort is a per-model override. Prefer this mode's pending
+	// (in-flight) value so the selector doesn't flick back to the committed
+	// value during a commit round-trip; fall back to the committed override.
+	// Undefined lets the selector fall back to the legacy mode-level fields.
+	const pendingModelSelection = selectedModelOverridesRef.current[currentMode]
+	const pendingReasoningEffort =
+		pendingModelSelection.modelId === selectedModelId?.trim() ? pendingModelSelection.overrides.reasoningEffort : undefined
+	const reasoningEffortOverride = pendingReasoningEffort ?? selectedModelOverrides.reasoningEffort
+	const displayedReasoningEffort = isOpenaiReasoningEffort(reasoningEffortOverride) ? reasoningEffortOverride : undefined
 
 	const commitOpenAiSelection = useCallback(
 		(modelId: string, overrides?: ProviderModelOverrides) => {
@@ -632,6 +642,12 @@ export const OpenAICompatibleProvider = ({
 						currentMode={currentMode}
 						defaultEffort="none"
 						onEffortChange={(effort) => {
+							// Reasoning effort is model configuration: persist it with the
+							// model's other overrides (models.json) so switching models
+							// restores each model's own setting.
+							updateModelOverride("reasoningEffort", effort)
+							// Keep the provider-level setting as the fallback for models
+							// without an override and for older readers of providers.json.
 							void write({
 								reasoning: {
 									enabled: effort !== "none",
@@ -639,6 +655,7 @@ export const OpenAICompatibleProvider = ({
 								},
 							}).catch((err) => console.error("Failed to update OpenAI Compatible reasoning effort:", err))
 						}}
+						value={displayedReasoningEffort}
 					/>
 					<ModelInfoView isPopup={isPopup} modelInfo={selectedModelInfo} selectedModelId={selectedModelId} />
 				</>

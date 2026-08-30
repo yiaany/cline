@@ -719,6 +719,48 @@ describe("createProviderConfigStore", () => {
 		expect(store.readSelection(providerId, "act")?.overrides).toEqual({ temperature: 0.4 })
 	})
 
+	it("round-trips per-model reasoning effort overrides and keeps them model-scoped", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "model-a",
+			overrides: { reasoningEffort: "none" },
+		})
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "model-b",
+			overrides: { reasoningEffort: "high" },
+		})
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models).toMatchObject({
+			"model-a": { reasoningEffort: "none" },
+			"model-b": { reasoningEffort: "high" },
+		})
+		expect(store.readSelection(providerId, "act")?.overrides).toEqual({ reasoningEffort: "high" })
+
+		// Switching back to model-a restores its own reasoning setting.
+		store.commitSelection(providerId, "act", { providerId, modelId: "model-a" })
+		expect(store.readSelection(providerId, "act")?.overrides).toEqual({ reasoningEffort: "none" })
+	})
+
+	it("drops an unknown reasoning effort value at the storage boundary", async () => {
+		const { createProviderConfigStore } = await import("./store")
+		const store = createProviderConfigStore()
+		const providerId = parseProviderId("openai")
+
+		store.commitSelection(providerId, "act", {
+			providerId,
+			modelId: "custom-model",
+			overrides: { reasoningEffort: "ultra" },
+		})
+
+		expect(mocks.getModelsFile().providers["openai-compatible"]?.models?.["custom-model"]).toBeUndefined()
+		expect(store.readSelection(providerId, "act")?.overrides).toBeUndefined()
+	})
+
 	it.each([
 		[ApiFormat.OPENAI_CHAT, "default"],
 		[ApiFormat.R1_CHAT, "r1"],
@@ -1134,11 +1176,13 @@ describe("createProviderConfigStore", () => {
 				cacheWritesPrice: 0.2,
 				temperature: 0.7,
 				apiFormat: ApiFormat.OPENAI_RESPONSES,
+				reasoningEffort: "high",
 			},
 		})
 
 		const entry = mocks.getModelsFile().providers["openai-compatible"]?.models?.["contract-model"]
 		expect(entry).toBeDefined()
+		expect(entry?.reasoningEffort).toBe("high")
 		// No SDK capability may be silently stripped by the store's converter.
 		expect([...(entry?.capabilities as string[])].sort()).toEqual([...ModelCapabilitySchema.options].sort())
 		// The entry written by the extension must satisfy the real schema that

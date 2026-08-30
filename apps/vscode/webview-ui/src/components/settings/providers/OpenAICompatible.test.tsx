@@ -156,7 +156,19 @@ vi.mock("../common/DebouncedTextField", () => ({
 }))
 
 vi.mock("../common/ModelInfoView", () => ({ ModelInfoView: () => null }))
-vi.mock("../ReasoningEffortSelector", () => ({ default: () => null }))
+vi.mock("../ReasoningEffortSelector", () => ({
+	default: ({ onEffortChange, value }: { onEffortChange?: (effort: string) => void; value?: string }) => (
+		<div>
+			<span data-testid="reasoning-effort-value">{value ?? "unset"}</span>
+			<button onClick={() => onEffortChange?.("high")} type="button">
+				Set Reasoning High
+			</button>
+			<button onClick={() => onEffortChange?.("none")} type="button">
+				Set Reasoning None
+			</button>
+		</div>
+	),
+}))
 
 function deferred<T>() {
 	let resolve!: (value: T) => void
@@ -667,6 +679,52 @@ describe("OpenAICompatibleProvider", () => {
 		expect(screen.getByRole("button", { name: "Add Header" })).toBeDisabled()
 		expect(screen.getByLabelText("Set Azure API version")).toBeDisabled()
 		expect(screen.getByRole("checkbox", { name: "Use Azure Identity Authentication" })).toBeChecked()
+	})
+
+	it("commits reasoning effort as a per-model override and keeps the provider-level fallback", async () => {
+		setCommittedSelection({ inputPrice: 3 })
+		render(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={true} />)
+		await act(async () => {})
+
+		fireEvent.click(screen.getByRole("button", { name: "Set Reasoning High" }))
+
+		expect(mocks.commitSelection).toHaveBeenCalledWith("act", {
+			providerId: "custom-openai",
+			modelId: "custom-model",
+			overrides: { inputPrice: 3, reasoningEffort: "high" },
+		})
+		expect(mocks.write).toHaveBeenCalledWith({ reasoning: { enabled: true, effort: "high" } })
+	})
+
+	it("commits an explicit none override so the model pins reasoning off", async () => {
+		setCommittedSelection({ reasoningEffort: "high" })
+		render(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={true} />)
+		await act(async () => {})
+
+		fireEvent.click(screen.getByRole("button", { name: "Set Reasoning None" }))
+
+		expect(mocks.commitSelection).toHaveBeenCalledWith("act", {
+			providerId: "custom-openai",
+			modelId: "custom-model",
+			overrides: { reasoningEffort: "none" },
+		})
+		expect(mocks.write).toHaveBeenCalledWith({ reasoning: { enabled: false, effort: undefined } })
+	})
+
+	it("displays the committed per-model reasoning override", async () => {
+		setCommittedSelection({ reasoningEffort: "low" })
+		render(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={true} />)
+		await act(async () => {})
+
+		expect(screen.getByTestId("reasoning-effort-value")).toHaveTextContent("low")
+	})
+
+	it("leaves the selector uncontrolled when the model has no reasoning override", async () => {
+		setCommittedSelection({ inputPrice: 3 })
+		render(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={true} />)
+		await act(async () => {})
+
+		expect(screen.getByTestId("reasoning-effort-value")).toHaveTextContent("unset")
 	})
 
 	it("writes editable Azure settings through the legacy handlers", async () => {
