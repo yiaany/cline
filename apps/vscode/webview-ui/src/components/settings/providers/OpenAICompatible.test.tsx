@@ -470,6 +470,48 @@ describe("OpenAICompatibleProvider", () => {
 		})
 	})
 
+	it("keeps the vision checkbox on the pending value while its commit is still round-tripping", async () => {
+		// Regression test for #13694: the resolved model info still reads the
+		// stale pre-edit value until the commit read-back lands. Rendering
+		// that stale value would re-apply checked=true onto the element the
+		// user just unchecked, and fast-foundation checkboxes re-emit
+		// programmatic re-syncs as change events — committing the stale value
+		// right back.
+		const commit = deferred<void>()
+		mocks.commitSelection.mockReturnValueOnce(commit.promise)
+		setCommittedSelection({}, { supportsImages: true })
+		const view = renderProvider()
+		await act(async () => {})
+		fireEvent.click(screen.getByText("Model Configuration"))
+
+		const checkbox = screen.getByRole("checkbox", { name: "Supports Images" })
+		expect(checkbox).toBeChecked()
+
+		fireEvent.click(checkbox)
+
+		expect(mocks.commitSelection).toHaveBeenCalledTimes(1)
+		expect(mocks.commitSelection).toHaveBeenCalledWith("act", {
+			providerId: "custom-openai",
+			modelId: "custom-model",
+			overrides: { supportsVision: false },
+		})
+
+		// A re-render during the round trip (read-back still stale) must keep
+		// showing the user's pending value, not snap back to checked.
+		view.rerender(<OpenAICompatibleProvider currentMode="act" providerId="custom-openai" showModelOptions={false} />)
+		expect(checkbox).not.toBeChecked()
+
+		// A change event that only echoes the effective value (fast-foundation
+		// re-emits programmatic checked re-syncs as change events) must not
+		// produce a second commit.
+		fireEvent.change(checkbox, { target: { checked: false } })
+		expect(mocks.commitSelection).toHaveBeenCalledTimes(1)
+
+		await act(async () => {
+			commit.resolve(undefined)
+		})
+	})
+
 	it("persists a temperature edit without adding resolved defaults", async () => {
 		renderProvider()
 		await act(async () => {})

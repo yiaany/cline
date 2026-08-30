@@ -163,6 +163,22 @@ export const OpenAICompatibleProvider = ({
 		[commitOpenAiSelection, currentMode, selectedModelId],
 	)
 
+	// Effective "Supports Images" value: prefer this mode's in-flight pending
+	// override over the resolved model info. During a commit round-trip the
+	// resolved info still reads the stale pre-edit value; binding the checkbox
+	// to it would re-apply that stale value on re-render, and fast-foundation's
+	// checkbox emits a `change` event on any programmatic `checked` change —
+	// which the onChange handler would then commit as a spurious override.
+	// Reading the ref here (render and handler) keeps both in sync with the
+	// user's latest edit.
+	const effectiveSupportsVision = useCallback(() => {
+		const pending = selectedModelOverridesRef.current[currentMode]
+		if (pending.modelId === selectedModelId?.trim() && Object.hasOwn(pending.overrides, "supportsVision")) {
+			return pending.overrides.supportsVision === true
+		}
+		return !!openAiModelInfo?.supportsImages
+	}, [currentMode, selectedModelId, openAiModelInfo])
+
 	const updateNumericModelOverride = useCallback(
 		(key: NumericModelOverrideKey, label: string, value: string) => {
 			const parsed = parseOptionalFiniteNumber(value)
@@ -554,8 +570,21 @@ export const OpenAICompatibleProvider = ({
 			{modelConfigurationSelected && (
 				<>
 					<VSCodeCheckbox
-						checked={!!openAiModelInfo?.supportsImages}
-						onChange={(e: any) => updateModelOverride("supportsVision", e.target.checked === true)}>
+						checked={effectiveSupportsVision()}
+						onChange={(e: any) => {
+							const isChecked = e.target.checked === true
+							// fast-foundation checkboxes emit `change` for
+							// programmatic `checked` re-syncs (model/mode
+							// switches, re-renders), not just user clicks.
+							// A change event whose value already equals the
+							// effective value is such an echo; committing it
+							// would persist the resolved value as an override.
+							const isEcho = isChecked === effectiveSupportsVision()
+							if (isEcho) {
+								return
+							}
+							updateModelOverride("supportsVision", isChecked)
+						}}>
 						Supports Images
 					</VSCodeCheckbox>
 
