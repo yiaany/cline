@@ -179,6 +179,92 @@ async function blobToBase64(blob: Blob): Promise<string> {
 	return window.btoa(binary);
 }
 
+/**
+ * Speech input failures fall into two very different buckets: the capture
+ * layer (microphone permission/device — surfaced by the browser as
+ * DOMExceptions or SpeechRecognition/MediaRecorder events) and the
+ * transcription pipeline (provider configuration/credentials — surfaced by
+ * our own code as plain Errors). The first needs the user to fix system
+ * permissions, the second is fixed in Settings → Voice.
+ */
+export type SpeechInputFailure =
+	| { kind: "microphone"; title: string; description: string; detail: string }
+	| { kind: "provider"; detail: string }
+	| { kind: "ignored"; detail: string };
+
+// Transient browser speech-recognition outcomes that resolve on retry;
+// neither an error toast nor the voice settings page helps with these.
+const IGNORED_RECOGNITION_ERRORS = new Set(["no-speech", "aborted"]);
+
+function microphoneFailureCopy(code: string): {
+	title: string;
+	description: string;
+} {
+	switch (code) {
+		case "NotAllowedError":
+		case "PermissionDeniedError":
+		case "SecurityError":
+		case "not-allowed":
+		case "service-not-allowed":
+			return {
+				title: "Microphone access denied",
+				description:
+					"Allow microphone access for Cline in your system settings, then try again.",
+			};
+		case "NotFoundError":
+		case "DevicesNotFoundError":
+			return {
+				title: "No microphone found",
+				description: "Connect a microphone and try again.",
+			};
+		case "NotReadableError":
+		case "TrackStartError":
+			return {
+				title: "Microphone unavailable",
+				description:
+					"Another application may be using the microphone. Close it and try again.",
+			};
+		default:
+			return {
+				title: "Microphone error",
+				description:
+					"Speech input could not access the microphone. Check the microphone and its permission, then try again.",
+			};
+	}
+}
+
+export function classifySpeechInputFailure(error: unknown): SpeechInputFailure {
+	const domException =
+		error instanceof DOMException
+			? error
+			: error instanceof Event &&
+					(error as { error?: unknown }).error instanceof DOMException
+				? ((error as { error?: unknown }).error as DOMException)
+				: null;
+	if (domException) {
+		return {
+			kind: "microphone",
+			...microphoneFailureCopy(domException.name),
+			detail: `${domException.name}: ${domException.message}`,
+		};
+	}
+	if (error instanceof Event) {
+		const code = (error as { error?: unknown }).error;
+		if (typeof code === "string" && IGNORED_RECOGNITION_ERRORS.has(code)) {
+			return { kind: "ignored", detail: code };
+		}
+		return {
+			kind: "microphone",
+			...microphoneFailureCopy(typeof code === "string" ? code : error.type),
+			detail: typeof code === "string" ? code : error.type,
+		};
+	}
+	return {
+		kind: "provider",
+		detail: error instanceof Error ? error.message : String(error),
+	};
+}
+
 function resolveEffortIndex(
 	thinking: ChatSessionConfig["thinking"],
 	reasoningEffort: ChatSessionConfig["reasoningEffort"],
@@ -348,6 +434,7 @@ function ChatInputBarImpl({
 	onSteerPromptInQueue,
 	onEditPromptInQueue,
 	onRemovePromptInQueue,
+	onOpenVoiceInputSettings,
 	summary,
 }: ChatInputBarProps) {
 	const {
@@ -752,24 +839,42 @@ function ChatInputBarImpl({
 		[transcriptionTarget],
 	);
 
-	const handleSpeechInputError = useCallback((error: unknown) => {
-		const message =
-			error instanceof Error
-				? error.message
-				: "Check microphone permission and audio provider settings.";
-		writeDesktopDebugLog({
-			scope: "voice-input",
-			level: "error",
-			message: "Speech input failed in the webview",
-			timestamp: new Date().toISOString(),
-			metadata: { failure: message },
-		});
-		toast({
-			variant: "destructive",
-			title: "Speech input failed",
-			description: message,
-		});
-	}, []);
+	const handleSpeechInputError = useCallback(
+		(error: unknown) => {
+			const failure = classifySpeechInputFailure(error);
+			writeDesktopDebugLog({
+				scope: "voice-input",
+				level: failure.kind === "ignored" ? "debug" : "error",
+				message: "Speech input failed in the webview",
+				timestamp: new Date().toISOString(),
+				metadata: { failure: failure.detail, kind: failure.kind },
+			});
+			if (failure.kind === "ignored") {
+				return;
+			}
+			if (failure.kind === "provider" && onOpenVoiceInputSettings) {
+				// Provider-side failures (missing/invalid credentials, transcription
+				// setup) are fixed in Settings → Voice, so land the user there
+				// instead of showing an error box they cannot act on.
+				onOpenVoiceInputSettings();
+				return;
+			}
+			if (failure.kind === "provider") {
+				toast({
+					variant: "destructive",
+					title: "Speech input failed",
+					description: failure.detail,
+				});
+				return;
+			}
+			toast({
+				variant: "destructive",
+				title: failure.title,
+				description: failure.description,
+			});
+		},
+		[onOpenVoiceInputSettings],
+	);
 
 	const effortIndex = useMemo(
 		() => resolveEffortIndex(thinking, reasoningEffort),

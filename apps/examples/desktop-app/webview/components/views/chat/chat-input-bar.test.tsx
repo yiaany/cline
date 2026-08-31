@@ -12,6 +12,7 @@ import {
 import {
 	buildUserInstructionSlashCommands,
 	ChatInputBar,
+	classifySpeechInputFailure,
 } from "./chat-input-bar";
 
 const {
@@ -20,6 +21,7 @@ const {
 	speechInputMockState,
 	startVercelStreamingTranscriptionMock,
 	subscribeToProviderModelsMock,
+	toastMock,
 } = vi.hoisted(() => ({
 	loadProviderModelCatalogMock: vi.fn(),
 	loadProviderModelsMock: vi.fn(),
@@ -28,12 +30,14 @@ const {
 	},
 	startVercelStreamingTranscriptionMock: vi.fn(),
 	subscribeToProviderModelsMock: vi.fn(() => vi.fn()),
+	toastMock: vi.fn(),
 }));
 
 type MockSpeechInputProps = {
 	disabled?: boolean;
 	onActiveChange?: (active: boolean) => void;
 	onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+	onError?: (error: unknown) => void;
 	onProcessingChange?: (processing: boolean) => void;
 	onStartStreaming?: () => Promise<unknown>;
 	onStreamingEnd?: () => void;
@@ -80,6 +84,10 @@ vi.mock("@/lib/vercel-streaming-transcription", () => ({
 	startVercelStreamingTranscription: startVercelStreamingTranscriptionMock,
 }));
 
+vi.mock("@/hooks/use-toast", () => ({
+	toast: toastMock,
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -100,6 +108,7 @@ beforeEach(() => {
 		cancel: vi.fn(),
 	});
 	subscribeToProviderModelsMock.mockReset().mockReturnValue(vi.fn());
+	toastMock.mockReset();
 	HTMLElement.prototype.scrollIntoView = vi.fn();
 	HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
 	HTMLElement.prototype.setPointerCapture = vi.fn();
@@ -154,6 +163,7 @@ function deferred<T>() {
 async function renderVoiceComposer({
 	hasRunningAgents = false,
 	onAbort = vi.fn(),
+	onOpenVoiceInputSettings,
 	onPromptInputChange = vi.fn(),
 	onSend = vi.fn(),
 	prompt = "",
@@ -162,6 +172,7 @@ async function renderVoiceComposer({
 }: {
 	hasRunningAgents?: boolean;
 	onAbort?: ReturnType<typeof vi.fn>;
+	onOpenVoiceInputSettings?: ReturnType<typeof vi.fn>;
 	onPromptInputChange?: ReturnType<typeof vi.fn>;
 	onSend?: ReturnType<typeof vi.fn>;
 	prompt?: string;
@@ -186,6 +197,7 @@ async function renderVoiceComposer({
 					}))}
 					onModeToggle={vi.fn()}
 					onModelChange={vi.fn()}
+					onOpenVoiceInputSettings={onOpenVoiceInputSettings}
 					onPromptInputChange={onPromptInputChange}
 					onProviderChange={vi.fn()}
 					onReasoningChange={vi.fn()}
@@ -1939,5 +1951,125 @@ describe("ChatInputBar token ring", () => {
 		);
 		const progressCircle = trigger?.querySelector("circle.stroke-red-500");
 		expect(progressCircle?.getAttribute("stroke-dashoffset")).toBe("0");
+	});
+});
+
+describe("classifySpeechInputFailure", () => {
+	it("classifies getUserMedia permission failures as microphone errors", () => {
+		expect(
+			classifySpeechInputFailure(
+				new DOMException("Permission denied", "NotAllowedError"),
+			),
+		).toMatchObject({ kind: "microphone", title: "Microphone access denied" });
+	});
+
+	it("classifies missing capture devices as microphone errors", () => {
+		expect(
+			classifySpeechInputFailure(
+				new DOMException("Requested device not found", "NotFoundError"),
+			),
+		).toMatchObject({ kind: "microphone", title: "No microphone found" });
+	});
+
+	it("classifies speech-recognition permission events as microphone errors", () => {
+		const event = Object.assign(new Event("error"), { error: "not-allowed" });
+		expect(classifySpeechInputFailure(event)).toMatchObject({
+			kind: "microphone",
+			title: "Microphone access denied",
+		});
+	});
+
+	it("ignores transient speech-recognition outcomes", () => {
+		const event = Object.assign(new Event("error"), { error: "no-speech" });
+		expect(classifySpeechInputFailure(event)).toEqual({
+			kind: "ignored",
+			detail: "no-speech",
+		});
+	});
+
+	it("classifies recorder events carrying a DOMException as microphone errors", () => {
+		const event = Object.assign(new Event("error"), {
+			error: new DOMException("Device busy", "NotReadableError"),
+		});
+		expect(classifySpeechInputFailure(event)).toMatchObject({
+			kind: "microphone",
+			title: "Microphone unavailable",
+		});
+	});
+
+	it("classifies transcription pipeline errors as provider failures", () => {
+		expect(
+			classifySpeechInputFailure(new Error("Unauthorized: invalid API key")),
+		).toEqual({ kind: "provider", detail: "Unauthorized: invalid API key" });
+	});
+});
+
+describe("speech input error routing", () => {
+	const voiceCatalog = () =>
+		providerCatalog({
+			providerId: "openai-native",
+			providerName: "OpenAI",
+			modelId: "gpt-4o-mini-transcribe",
+			modelName: "GPT-4o mini Transcribe",
+			supportsStreaming: false,
+		});
+
+	it("opens the voice settings for provider failures instead of a toast", async () => {
+		loadProviderModelCatalogMock.mockResolvedValue(voiceCatalog());
+		const onOpenVoiceInputSettings = vi.fn();
+		await renderVoiceComposer({ onOpenVoiceInputSettings });
+		await vi.waitFor(() =>
+			expect(speechInputMockState.current?.onError).toBeDefined(),
+		);
+
+		await act(async () =>
+			speechInputMockState.current?.onError?.(
+				new Error("Unauthorized: invalid API key"),
+			),
+		);
+
+		expect(onOpenVoiceInputSettings).toHaveBeenCalledOnce();
+		expect(toastMock).not.toHaveBeenCalled();
+	});
+
+	it("shows a microphone toast for permission failures without opening settings", async () => {
+		loadProviderModelCatalogMock.mockResolvedValue(voiceCatalog());
+		const onOpenVoiceInputSettings = vi.fn();
+		await renderVoiceComposer({ onOpenVoiceInputSettings });
+		await vi.waitFor(() =>
+			expect(speechInputMockState.current?.onError).toBeDefined(),
+		);
+
+		await act(async () =>
+			speechInputMockState.current?.onError?.(
+				new DOMException("Permission denied", "NotAllowedError"),
+			),
+		);
+
+		expect(onOpenVoiceInputSettings).not.toHaveBeenCalled();
+		expect(toastMock).toHaveBeenCalledWith({
+			variant: "destructive",
+			title: "Microphone access denied",
+			description:
+				"Allow microphone access for Cline in your system settings, then try again.",
+		});
+	});
+
+	it("suppresses transient speech-recognition failures entirely", async () => {
+		loadProviderModelCatalogMock.mockResolvedValue(voiceCatalog());
+		const onOpenVoiceInputSettings = vi.fn();
+		await renderVoiceComposer({ onOpenVoiceInputSettings });
+		await vi.waitFor(() =>
+			expect(speechInputMockState.current?.onError).toBeDefined(),
+		);
+
+		await act(async () =>
+			speechInputMockState.current?.onError?.(
+				Object.assign(new Event("error"), { error: "no-speech" }),
+			),
+		);
+
+		expect(onOpenVoiceInputSettings).not.toHaveBeenCalled();
+		expect(toastMock).not.toHaveBeenCalled();
 	});
 });
