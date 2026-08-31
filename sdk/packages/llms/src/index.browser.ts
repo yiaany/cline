@@ -37,6 +37,10 @@ export {
 	shouldShowProviderUsageCost,
 } from "./providers/billing";
 export {
+	type ProviderLocalCli,
+	resolveProviderLocalCli,
+} from "./providers/local-cli";
+export {
 	BUILTIN_MODEL_OPERATION_CAPABILITIES,
 	builtinProviderSupportsModelOperation,
 	providerManifestSupportsModelOperation,
